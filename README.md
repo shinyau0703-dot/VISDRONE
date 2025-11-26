@@ -5,7 +5,7 @@
 這個專案使用 **VisDrone2019-DET** 資料集，搭配 **Ultralytics YOLOv8n** 進行多類別物件偵測練習（行人、車輛、機車、腳踏車等），目標是：
 
 - 熟悉 **YOLOv8 + PyTorch** 的訓練與推論流程  
-- 練習從 **模型輸出 → CSV → 後處理（假經緯度）** 的完整 pipeline  
+- 練習從 **模型輸出 → CSV → 後處理（經緯度）** 的完整 pipeline  
 - 把整個過程整理成一個乾淨的範例專案（含檔案架構與流程圖）
 
 ---
@@ -50,8 +50,7 @@
 
 - **VisDrone2019-DET-train**：訓練用影像與標註  
 - **VisDrone2019-DET-val**：驗證用影像與標註  
-Dataset: https://github.com/VisDrone/VisDrone-Dataset.git
-結構概念（實際樹狀圖請看 `docs/project_structure.md`）：
+Dataset: https://github.com/VisDrone/VisDrone-Dataset.git 
 
 ```text
 datasets/
