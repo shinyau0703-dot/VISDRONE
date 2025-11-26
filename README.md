@@ -50,7 +50,7 @@
 
 - **VisDrone2019-DET-train**：訓練用影像與標註  
 - **VisDrone2019-DET-val**：驗證用影像與標註  
-
+Dataset: https://github.com/VisDrone/VisDrone-Dataset.git
 結構概念（實際樹狀圖請看 `docs/project_structure.md`）：
 
 ```text
