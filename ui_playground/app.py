@@ -2,67 +2,15 @@
 # cd D:\Sandy\VisDrone\ui_playground
 # & "C:/Users/Sandy/AppData/Local/Programs/Python/Python311/python.exe" -m streamlit run app.py
 
-import os
 import io
-import sys
-from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 from PIL import Image
-from ultralytics import YOLO
 
-# ================== 路徑與 DB 工具 ==================
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-POSTGRESQL_DIR = PROJECT_ROOT / "PostgreSQL"
-sys.path.append(str(POSTGRESQL_DIR))
+from backend import CLASS_MAP, run_inference, save_raw_image, safe_log
 
-# 這裡假設你已經有 db_utils.py（含 insert_raw_image, write_log）
-try:
-    from db_utils import insert_raw_image, write_log
-except ImportError:
-    insert_raw_image = None
-    write_log = None
-
-
-def safe_log(level, source, message, run_id=None, detail=None):
-    """寫 log 進 DB，失敗就只印在 console，不讓整個 app 掛掉。"""
-    if write_log is None:
-        return
-    try:
-        write_log(level, source, message, run_id, detail)
-    except Exception as e:
-        print(f"[LOG ERROR] {e}")
-
-
-# 權重路徑：優先用 models/best.pt，其次 models/yolov8n.pt
-MODELS_DIR = PROJECT_ROOT / "models"
-if (MODELS_DIR / "best.pt").exists():
-    WEIGHTS_PATH = MODELS_DIR / "best.pt"
-elif (MODELS_DIR / "yolov8n.pt").exists():
-    WEIGHTS_PATH = MODELS_DIR / "yolov8n.pt"
-else:
-    # fallback：舊版放在 ui_playground
-    WEIGHTS_PATH = PROJECT_ROOT / "ui_playground" / "yolov8n.pt"
-
-# 強制用 CPU，避免本機 CUDA 相容問題（你要用 GPU 可以把這行拿掉）
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-
-# VisDrone / YOLO 類別對照
-CLASS_MAP = {
-    0: "pedestrian",
-    1: "people",
-    2: "bicycle",
-    3: "car",
-    4: "van",
-    5: "truck",
-    6: "tricycle",
-    7: "awning-tricycle",
-    8: "bus",
-    9: "motor",
-}
-
+# ================== Streamlit Page Config ==================
 st.set_page_config(
     page_title="VisDrone YOLOv8",
     layout="wide",
@@ -110,7 +58,7 @@ st.markdown(
         font-size:2.4rem;
         filter:drop-shadow(0 0 12px rgba(250,250,250,0.7));
     }
-    .hero-sub{
+    .hero-sub}{
         font-size:0.85rem;
         color:#9ca3af;
         text-align:right;
@@ -211,51 +159,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ================== 模型 ==================
-@st.cache_resource
-def load_model():
-    return YOLO(str(WEIGHTS_PATH))
-
-
-def run_inference(img: Image.Image, imgsz: int, conf: float, filename: str, classes_ids):
-    model = load_model()
-    img_np = np.array(img)
-
-    results = model.predict(
-        source=img_np,
-        imgsz=imgsz,
-        conf=conf,
-        device="cpu",
-        classes=classes_ids,  # None = 不過濾
-        verbose=False,
-        save=False,
-    )
-    r = results[0]
-
-    plotted = r.plot()
-    plotted_rgb = Image.fromarray(plotted[..., ::-1])
-
-    rows = []
-    if r.boxes is not None:
-        for box in r.boxes:
-            xyxy = box.xyxy[0].tolist()
-            cls_id = int(box.cls)
-            rows.append(
-                {
-                    "file": filename,
-                    "cls": cls_id,
-                    "label": CLASS_MAP.get(cls_id, str(cls_id)),
-                    "conf": float(box.conf),
-                    "xmin": float(xyxy[0]),
-                    "ymin": float(xyxy[1]),
-                    "xmax": float(xyxy[2]),
-                    "ymax": float(xyxy[3]),
-                }
-            )
-    df = pd.DataFrame(rows)
-    return plotted_rgb, df
-
-
 # ================== 上方：上傳 + 參數 ==================
 left, right = st.columns([2, 1])
 
@@ -347,26 +250,22 @@ if run_button and uploaded_files:
         width, height = img.size
         content_type = getattr(f, "type", None) or "image/jpeg"
 
-        # === 把原始圖片寫進 raw_images（非結構化資料塞 DB） ===
-        image_id = None
-        if insert_raw_image is not None:
-            try:
-                image_id = insert_raw_image(
-                    img_bytes=img_bytes,
-                    filename=f.name,
-                    content_type=content_type,
-                    width=width,
-                    height=height,
-                )
-                safe_log("INFO", "app.py", f"raw_images 寫入成功 image_id={image_id}, file={f.name}")
-            except Exception as e:
-                print(f"[DB] 寫入 raw_images 失敗：{e}")
-                safe_log("ERROR", "app.py", f"raw_images 寫入失敗 file={f.name}", detail=str(e))
+        # === 後端：把原始圖片寫進 raw_images（非結構化資料塞 DB） ===
+        image_id = save_raw_image(
+            img_bytes=img_bytes,
+            filename=f.name,
+            content_type=content_type,
+            width=width,
+            height=height,
+        )
 
-        # YOLO 偵測
+        # 後端：YOLO 偵測
         plotted_img, df_boxes = run_inference(img, imgsz, conf, f.name, classes_ids)
+
+        # 前端：整理顯示用資料
         results_images.append((f.name, plotted_img))
         if not df_boxes.empty:
+            # 這裡你之後要接 detections table，也可以把 image_id 加進 df_boxes
             all_rows.append(df_boxes)
 
         pct = int((idx + 1) / n_files * 100)
