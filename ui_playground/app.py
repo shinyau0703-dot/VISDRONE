@@ -1,14 +1,11 @@
-"""
-使用方式（PowerShell）：
-
-cd D:\Sandy\VisDrone\ui_playground
-& "C:/Users/Sandy/AppData/Local/Programs/Python/Python311/python.exe" -m streamlit run app.py
-"""
-
-
+# 使用方式（PowerShell）：
+# cd D:\Sandy\VisDrone\ui_playground
+# & "C:/Users/Sandy/AppData/Local/Programs/Python/Python311/python.exe" -m streamlit run app.py
 
 import os
 import io
+import sys
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -17,11 +14,28 @@ import streamlit as st
 from PIL import Image
 from ultralytics import YOLO
 
+# ==== 把 PostgreSQL/db_utils.py 加到匯入路徑 ====
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+POSTGRESQL_DIR = PROJECT_ROOT / "PostgreSQL"
+sys.path.append(str(POSTGRESQL_DIR))
+
+from db_utils import write_log  # 從 db_utils 匯入寫 log 的函式
+
+
+def safe_log(level, source, message, run_id=None, detail=None):
+    """
+    安全寫 log：就算寫入 DB 失敗也不會讓整個 app 掛掉
+    """
+    try:
+        write_log(level, source, message, run_id, detail)
+    except Exception as e:
+        print(f"[LOG ERROR] {e}")
+
+
 # 強制用 CPU，避免本機 CUDA 相容問題
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 # 專案根目錄（app.py 在 ui_playground/ 底下）
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEIGHTS_PATH = PROJECT_ROOT / "models" / "best.pt"
 
 # VisDrone / YOLO 類別對照
@@ -304,72 +318,114 @@ with prog_col:
 result_col, table_col = st.columns([2, 1])
 
 if run_button and uploaded_files:
-    all_rows = []
-    results_images = []
+    # 按下開始偵測 + 有上傳檔案：寫一筆 run 開始的 log
     n_files = len(uploaded_files)
+    safe_log(
+        "INFO",
+        "app.py",
+        f"開始偵測：images={n_files}, imgsz={imgsz}, conf={conf}, classes={selected_names}",
+    )
 
-    progress_text.markdown("⏱️ 正在處理影像…")
-    progress_bar.progress(0)
+    try:
+        all_rows = []
+        results_images = []
 
-    classes_ids = None if len(selected_ids) == 0 else selected_ids
+        progress_text.markdown("⏱️ 正在處理影像…")
+        progress_bar.progress(0)
 
-    for idx, f in enumerate(uploaded_files):
-        img_bytes = f.getvalue()
-        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        classes_ids = None if len(selected_ids) == 0 else selected_ids
 
-        plotted_img, df_boxes = run_inference(img, imgsz, conf, f.name, classes_ids)
-        results_images.append((f.name, plotted_img))
-        if not df_boxes.empty:
-            all_rows.append(df_boxes)
+        for idx, f in enumerate(uploaded_files):
+            img_bytes = f.getvalue()
+            img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
-        pct = int((idx + 1) / n_files * 100)
-        progress_bar.progress((idx + 1) / n_files)
-        progress_text.markdown(f"✅ 已完成 {idx + 1}/{n_files} 張影像（{pct}%）")
+            plotted_img, df_boxes = run_inference(img, imgsz, conf, f.name, classes_ids)
+            results_images.append((f.name, plotted_img))
 
-    # 左邊：所有偵測影像
-    with result_col:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<div class="card-title">📸 偵測結果影像（全部）</div>', unsafe_allow_html=True)
+            num_boxes = 0
+            if not df_boxes.empty:
+                all_rows.append(df_boxes)
+                num_boxes = len(df_boxes)
 
-        if results_images:
-            for i in range(0, len(results_images), 2):
-                cols = st.columns(2)
-                for j in range(2):
-                    idx2 = i + j
-                    if idx2 < len(results_images):
-                        name, img_pred = results_images[idx2]
-                        with cols[j]:
-                            st.markdown('<div class="img-frame">', unsafe_allow_html=True)
-                            st.image(img_pred, caption=name, use_container_width=True)
-                            st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.write("沒有任何影像產生偵測結果。")
+            # 每張影像偵測完成後寫一筆 log
+            safe_log(
+                "INFO",
+                "app.py",
+                f"單張偵測完成：file={f.name}, boxes={num_boxes}, imgsz={imgsz}, conf={conf}",
+            )
 
-        st.markdown("</div>", unsafe_allow_html=True)
+            pct = int((idx + 1) / n_files * 100)
+            progress_bar.progress((idx + 1) / n_files)
+            progress_text.markdown(f"✅ 已完成 {idx + 1}/{n_files} 張影像（{pct}%）")
 
-    # 右邊：bbox 表
-    with table_col:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown('<div class="card-title">📊 Bounding Boxes（所有影像彙整）</div>', unsafe_allow_html=True)
-
+        total_boxes = 0
+        df_all = None
         if all_rows:
             df_all = pd.concat(all_rows, ignore_index=True)
-            st.dataframe(df_all, hide_index=True, use_container_width=True)
+            total_boxes = df_all.shape[0]
 
-            csv_buf = io.StringIO()
-            df_all.to_csv(csv_buf, index=False)
-            st.download_button(
-                "下載偵測結果 CSV",
-                data=csv_buf.getvalue(),
-                file_name="detections_pixel_multi_image.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
-        else:
-            st.write("偵測結果為空，可能是 conf 太高或選到的類別在畫面裡太少。")
+        # run 結束總結 log
+        safe_log(
+            "INFO",
+            "app.py",
+            f"偵測完成：images={n_files}, total_boxes={total_boxes}, imgsz={imgsz}, conf={conf}",
+        )
 
-        st.markdown("</div>", unsafe_allow_html=True)
+        # 左邊：所有偵測影像
+        with result_col:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            st.markdown('<div class="card-title">📸 偵測結果影像（全部）</div>', unsafe_allow_html=True)
+
+            if results_images:
+                for i in range(0, len(results_images), 2):
+                    cols = st.columns(2)
+                    for j in range(2):
+                        idx2 = i + j
+                        if idx2 < len(results_images):
+                            name, img_pred = results_images[idx2]
+                            with cols[j]:
+                                st.markdown('<div class="img-frame">', unsafe_allow_html=True)
+                                st.image(img_pred, caption=name, use_container_width=True)
+                                st.markdown("</div>", unsafe_allow_html=True)
+            else:
+                st.write("沒有任何影像產生偵測結果。")
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        # 右邊：bbox 表
+        with table_col:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            st.markdown('<div class="card-title">📊 Bounding Boxes（所有影像彙整）</div>', unsafe_allow_html=True)
+
+            if df_all is not None and not df_all.empty:
+                st.dataframe(df_all, hide_index=True, use_container_width=True)
+
+                csv_buf = io.StringIO()
+                df_all.to_csv(csv_buf, index=False)
+                st.download_button(
+                    "下載偵測結果 CSV",
+                    data=csv_buf.getvalue(),
+                    file_name="detections_pixel_multi_image.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+            else:
+                st.write("偵測結果為空，可能是 conf 太高或選到的類別在畫面裡太少。")
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    except Exception as e:
+        # 偵測流程出錯：寫 ERROR log + 在 UI 顯示
+        err_msg = str(e)
+        err_detail = traceback.format_exc()
+        safe_log("ERROR", "app.py", err_msg, detail=err_detail)
+
+        progress_text.markdown("❌ 偵測過程發生錯誤，詳情請查看後端 log。")
+        progress_bar.progress(0)
+        st.error(f"偵測過程發生錯誤：{err_msg}")
 
 elif run_button and not uploaded_files:
+    # 有按按鈕但沒上傳檔案：寫一筆 WARNING log
+    safe_log("WARNING", "app.py", "按下開始偵測但沒有上傳影像")
     progress_text.markdown("⚠️ 請先上傳至少一張影像再開始偵測。")
     progress_bar.progress(0)
