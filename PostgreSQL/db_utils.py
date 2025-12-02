@@ -11,6 +11,27 @@ DB_CONFIG = {
     "password": os.getenv("PGPASSWORD", ""),
 }
 
+import psycopg2  # 你前面其實已經有這行，如果有就不用再加
+
+def insert_raw_image(img_bytes, filename, content_type, width, height):
+    """
+    將一張原始圖片（binary）寫進 raw_images 表，回傳 image_id。
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO raw_images (filename, content_type, width, height, bytes)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING id;
+        """,
+        (filename, content_type, width, height, psycopg2.Binary(img_bytes)),
+    )
+    image_id = cur.fetchone()[0]
+    conn.commit()
+    cur.close()
+    conn.close()
+    return image_id
 
 def get_conn():
     """

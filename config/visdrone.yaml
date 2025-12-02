@@ -1,18 +1,12 @@
-# VisDrone YOLOv8 dataset config
-
-# 資料集根目錄
+# 資料集目錄
 path: D:/Sandy/VisDrone/datasets
-
-# 相對於 path 的子路徑
 train: VisDrone2019-DET-train/images
 val: VisDrone2019-DET-val/images
-# 若之後有 test，可以加：
-# test: VisDrone2019-DET-test-dev/images
 
 # 類別數量
 nc: 10
 
-# 類別名稱（和你 app.py 的 CLASS_MAP 對齊）
+# 類別名稱
 names:
   - pedestrian
   - people
