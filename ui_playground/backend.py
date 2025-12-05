@@ -45,16 +45,16 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 # VisDrone / YOLO 類別對照（前後端共用）
 CLASS_MAP = {
-    0: "pedestrian",
+    0: "people", # 原本 pedestrian
     1: "people",
     2: "bicycle",
-    3: "car",
-    4: "van",
-    5: "truck",
-    6: "tricycle",
-    7: "awning-tricycle",
-    8: "bus",
-    9: "motor",
+    3: "car", 
+    4: "car",  # 原本 van
+    5: "car",   # 原本 truck
+    6: "bicycle",   # 原本 tricycle
+    7: "bicycle",   # 原本 awning-tricycle
+    8: "car",   # 原本 bus
+    9: "motor",  
 }
 
 

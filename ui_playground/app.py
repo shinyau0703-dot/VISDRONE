@@ -1,13 +1,10 @@
-# 使用方式（PowerShell）:
 # cd D:\Sandy\VisDrone\ui_playground
 # & "C:/Users/Sandy/AppData/Local/Programs/Python/Python311/python.exe" -m streamlit run app.py
 
 import io
-
 import pandas as pd
 import streamlit as st
 from PIL import Image
-
 from backend import CLASS_MAP, run_inference, save_raw_image, safe_log
 
 # ================== Streamlit Page Config ==================
