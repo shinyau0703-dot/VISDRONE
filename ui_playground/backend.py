@@ -57,7 +57,6 @@ CLASS_MAP = {
     9: "motor",  
 }
 
-
 def save_raw_image(img_bytes, filename, content_type, width, height):
     """
     將一張原始圖片寫進 raw_images 表，回傳 image_id。
