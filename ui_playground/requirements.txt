@@ -1,0 +1,9 @@
+streamlit
+pandas
+numpy
+Pillow
+opencv-python
+ultralytics
+torch
+torchvision
+psycopg2-binary
